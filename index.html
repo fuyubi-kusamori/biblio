@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Biblio — ISBN Bibliographic Retrieval</title>
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Slab:ital,wght@0,100;0,300;0,400;0,600;1,100;1,300&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --paper:        #f5f2ee;
+  --paper-deep:   #ede9e3;
+  --ink:          #1c1917;
+  --ink-mid:      #3d3830;
+  --ink-light:    #6b6460;
+  --gold:         #b8934a;
+  --gold-pale:    #d4b97a;
+  --gold-faint:   #e8d9bc;
+  --pewter:       #928d88;
+  --sage:         #7a8c7c;
+  --glass:        rgba(245,242,238,0.48);
+  --glass-bright: rgba(255,253,250,0.62);
+  --border:       rgba(184,147,74,0.16);
+  --border-soft:  rgba(184,147,74,0.09);
+  --shadow:       rgba(28,25,23,0.06);
+  --ok:           #5a8a6a;
+  --err:          #9a5050;
+  --blur-lg: 32px;
+  --blur-sm: 16px;
+  --r: 3px;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  min-height: 100vh;
+  font-family: 'Josefin Slab', serif;
+  background: var(--paper);
+  color: var(--ink);
+  overflow-x: hidden;
+  cursor: default;
+}
+
+/* ════════════════════════════════════════
+   BACKGROUND SYSTEM
+════════════════════════════════════════ */
+.bg {
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none; overflow: hidden;
+}
+
+/* Layer 1 — gradient mesh */
+.bg-mesh {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 90% 65% at  8% 12%, rgba(184,147,74,.09)  0%, transparent 55%),
+    radial-gradient(ellipse 70% 80% at 90% 85%, rgba(122,140,124,.08)  0%, transparent 52%),
+    radial-gradient(ellipse 55% 55% at 52% 46%, rgba(145,138,132,.05)  0%, transparent 60%),
+    radial-gradient(ellipse 45% 40% at 75%  6%, rgba(212,185,122,.075) 0%, transparent 48%),
+    radial-gradient(ellipse 60% 50% at 20% 88%, rgba(122,140,124,.055) 0%, transparent 50%),
+    linear-gradient(162deg, #f7f4f0 0%, #edeae4 30%, #f0ede7 55%, #edf0e8 78%, #f5f2ec 100%);
+}
+
+/* Layer 2 — geometric grid (parallax-slow) */
+.bg-grid {
+  position: absolute; inset: -10%;
+  width: 120%; height: 120%;
+  background-image:
+    linear-gradient(rgba(184,147,74,.048) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(184,147,74,.048) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 78% 72% at 50% 50%, rgba(0,0,0,.9) 20%, transparent 72%);
+  animation: gridDrift 35s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes gridDrift {
+  from { transform: translate(0, 0) rotate(0deg); }
+  to   { transform: translate(12px, 8px) rotate(.4deg); }
+}
+
+/* Layer 3 — diagonal thin lines */
+.bg-lines {
+  position: absolute; inset: 0;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 48px,
+    rgba(184,147,74,.022) 48px,
+    rgba(184,147,74,.022) 49px
+  );
+  opacity: 1;
+}
+
+/* Layer 4 — floating orbs (parallax depth) */
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(1px);
+  will-change: transform;
+}
+.orb-1 {
+  width: 560px; height: 560px;
+  background: radial-gradient(circle at 35% 40%, rgba(184,147,74,.075) 0%, transparent 65%);
+  top: -180px; left: -140px;
+  animation: orb1 22s ease-in-out infinite alternate;
+}
+.orb-2 {
+  width: 460px; height: 680px;
+  background: radial-gradient(circle at 60% 55%, rgba(122,140,124,.065) 0%, transparent 62%);
+  bottom: -200px; right: -100px;
+  border-radius: 42% 58% 62% 38% / 48% 52% 48% 52%;
+  animation: orb2 27s ease-in-out infinite alternate;
+}
+.orb-3 {
+  width: 300px; height: 300px;
+  background: radial-gradient(circle, rgba(212,185,122,.06) 0%, transparent 68%);
+  top: 38%; left: 60%;
+  animation: orb3 18s ease-in-out infinite alternate;
+}
+.orb-4 {
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, rgba(122,140,124,.05) 0%, transparent 70%);
+  top: 65%; left: 8%;
+  animation: orb4 14s ease-in-out infinite alternate;
+}
+@keyframes orb1 { from{transform:translate(0,0)scale(1)}    to{transform:translate(60px,42px)scale(1.08)} }
+@keyframes orb2 { from{transform:translate(0,0)rotate(0)}   to{transform:translate(-44px,-58px)rotate(12deg)} }
+@keyframes orb3 { from{transform:translate(0,0)}             to{transform:translate(-32px,52px)} }
+@keyframes orb4 { from{transform:translate(0,0)scale(1)}    to{transform:translate(28px,-36px)scale(1.12)} }
+
+/* Layer 5 — noise texture */
+.bg-noise {
+  position: absolute; inset: 0;
+  opacity: .028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+
+/* Layer 6 — light particles */
+.particles { position: absolute; inset: 0; }
+.p {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(184,147,74,.5);
+  animation: pfloat var(--d) ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+@keyframes pfloat {
+  from { transform: translate(0,0) scale(1);   opacity: var(--oa); }
+  to   { transform: translate(var(--tx),var(--ty)) scale(1.7); opacity: var(--ob); }
+}
+
+/* ════════════════════════════════════════
+   LAYOUT
+════════════════════════════════════════ */
+.page {
+  position: relative; z-index: 1;
+  min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 64px 24px 96px;
+}
+
+/* ════════════════════════════════════════
+   HEADER
+════════════════════════════════════════ */
+.header {
+  text-align: center;
+  margin-bottom: 56px;
+  animation: riseIn .9s cubic-bezier(.22,.68,0,1.2) both;
+}
+
+.logo-eyebrow {
+  font-size: .6rem;
+  letter-spacing: .5em;
+  text-transform: uppercase;
+  color: var(--pewter);
+  margin-bottom: 14px;
+  opacity: .7;
+}
+
+.logo {
+  font-size: clamp(3rem, 6vw, 4.4rem);
+  font-weight: 100;
+  letter-spacing: .3em;
+  color: var(--ink);
+  line-height: 1;
+  position: relative;
+  display: inline-block;
+}
+.logo-accent {
+  display: block;
+  width: 1px;
+  height: 48px;
+  background: linear-gradient(180deg, transparent, var(--gold), transparent);
+  margin: 16px auto;
+}
+.logo-sub {
+  font-size: .72rem;
+  font-weight: 300;
+  letter-spacing: .38em;
+  text-transform: uppercase;
+  color: var(--pewter);
+  font-style: italic;
+}
+
+/* ════════════════════════════════════════
+   GLASS PANEL
+════════════════════════════════════════ */
+.panel {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(var(--blur-lg)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(1.3);
+  border-radius: var(--r);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.7) inset,
+    0 -1px 0 rgba(184,147,74,.06) inset,
+    0 4px 48px var(--shadow),
+    0 1px 8px var(--shadow);
+  width: 100%; max-width: 780px;
+}
+
+.panel-main {
+  padding: 40px 44px;
+  animation: riseIn .9s cubic-bezier(.22,.68,0,1.2) .1s both;
+}
+
+/* ════════════════════════════════════════
+   FIELD LABELS
+════════════════════════════════════════ */
+.field-label {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px;
+}
+.field-label-line {
+  flex: 1; height: 1px;
+  background: linear-gradient(90deg, rgba(184,147,74,.2), transparent);
+}
+.field-label-text {
+  font-size: .58rem;
+  letter-spacing: .38em;
+  text-transform: uppercase;
+  color: var(--pewter);
+  white-space: nowrap;
+}
+
+/* ════════════════════════════════════════
+   TEXTAREA
+════════════════════════════════════════ */
+.isbn-textarea {
+  font-family: 'Josefin Slab', serif;
+  width: 100%;
+  min-height: 148px;
+  padding: 16px 20px;
+  background: var(--glass-bright);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--ink);
+  font-size: .88rem;
+  letter-spacing: .08em;
+  line-height: 2;
+  resize: vertical;
+  outline: none;
+  transition: border-color .25s, box-shadow .25s;
+  backdrop-filter: blur(var(--blur-sm));
+}
+.isbn-textarea:focus {
+  border-color: rgba(184,147,74,.45);
+  box-shadow: 0 0 0 3px rgba(184,147,74,.07);
+}
+.isbn-textarea::placeholder {
+  color: var(--pewter);
+  font-style: italic;
+  font-weight: 300;
+  opacity: .65;
+}
+
+.hint {
+  margin-top: 9px;
+  font-size: .6rem;
+  letter-spacing: .14em;
+  color: var(--pewter);
+  line-height: 1.8;
+  font-style: italic;
+}
+
+/* ════════════════════════════════════════
+   BUTTONS
+════════════════════════════════════════ */
+.btn-row {
+  display: flex; gap: 10px;
+  margin-top: 22px; flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn {
+  font-family: 'Josefin Slab', serif;
+  border-radius: var(--r);
+  font-size: .7rem;
+  letter-spacing: .26em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all .22s ease;
+  padding: 11px 26px;
+  position: relative;
+  overflow: hidden;
+}
+.btn::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: rgba(255,255,255,0);
+  transition: background .2s;
+}
+.btn:hover::after { background: rgba(255,255,255,.08); }
+
+.btn-gold {
+  background: linear-gradient(135deg, #c9a05a 0%, var(--gold) 40%, #a07838 100%);
+  border: none;
+  color: #fdf8f0;
+  box-shadow: 0 4px 20px rgba(184,147,74,.28), 0 1px 0 rgba(255,255,255,.25) inset;
+  letter-spacing: .3em;
+}
+.btn-gold:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(184,147,74,.38), 0 1px 0 rgba(255,255,255,.25) inset;
+}
+.btn-gold:disabled {
+  opacity: .38; cursor: not-allowed; transform: none;
+  box-shadow: none;
+}
+
+.btn-ghost {
+  background: rgba(255,255,255,.32);
+  border: 1px solid var(--border);
+  color: var(--ink-light);
+  backdrop-filter: blur(8px);
+}
+.btn-ghost:hover {
+  border-color: rgba(184,147,74,.38);
+  color: var(--gold);
+  background: rgba(184,147,74,.05);
+}
+
+/* ════════════════════════════════════════
+   PROGRESS
+════════════════════════════════════════ */
+.progress {
+  display: none;
+  margin-top: 22px;
+}
+.progress.on { display: block; }
+
+.progress-track {
+  height: 1px;
+  background: rgba(184,147,74,.12);
+  border-radius: 1px;
+  overflow: visible;
+  position: relative;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(184,147,74,.4), var(--gold), var(--gold-pale));
+  border-radius: 1px;
+  width: 0%;
+  transition: width .18s linear;
+  position: relative;
+}
+.progress-fill::after {
+  content: '';
+  position: absolute; right: -3px; top: -3px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 8px rgba(184,147,74,.6);
+}
+.progress-label {
+  margin-top: 9px;
+  font-size: .6rem;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: var(--pewter);
+  text-align: center;
+}
+
+/* ════════════════════════════════════════
+   RESULTS SECTION
+════════════════════════════════════════ */
+.results {
+  display: none;
+  margin-top: 32px;
+}
+.results.on { display: block; animation: riseIn .5s ease both; }
+
+.results-header {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 20px;
+}
+.results-rule {
+  flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(184,147,74,.22), transparent);
+}
+.results-title {
+  font-size: .58rem; letter-spacing: .36em;
+  text-transform: uppercase; color: var(--pewter);
+  white-space: nowrap;
+}
+.results-count {
+  font-size: .65rem; letter-spacing: .12em;
+  color: var(--pewter); flex: 1;
+}
+.results-count em { color: var(--gold); font-style: normal; font-weight: 600; }
+
+/* ════════════════════════════════════════
+   TABLE
+════════════════════════════════════════ */
+.table-scroll { overflow-x: auto; border-radius: var(--r); }
+
+table {
+  width: 100%; border-collapse: collapse;
+  background: var(--glass-bright);
+  backdrop-filter: blur(var(--blur-sm));
+  border-radius: var(--r);
+  overflow: hidden;
+}
+thead { border-bottom: 1px solid var(--border); }
+thead th {
+  padding: 11px 14px;
+  font-family: 'Josefin Slab', serif;
+  font-size: .56rem;
+  letter-spacing: .3em;
+  text-transform: uppercase;
+  color: var(--pewter);
+  font-weight: 400;
+  text-align: left;
+  background: rgba(184,147,74,.05);
+  white-space: nowrap;
+}
+thead th:first-child { width: 28px; padding-right: 8px; }
+
+tbody tr {
+  border-bottom: 1px solid var(--border-soft);
+  transition: background .15s;
+}
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: rgba(184,147,74,.03); }
+
+tbody td {
+  padding: 12px 14px;
+  vertical-align: top;
+  font-family: 'Josefin Slab', serif;
+  font-size: .8rem;
+  line-height: 1.7;
+  color: var(--ink-mid);
+}
+td.td-status { padding-right: 6px; vertical-align: middle; }
+td.td-title  { font-weight: 500; color: var(--ink); min-width: 160px; }
+td.td-isbn   { font-family: 'Josefin Slab', serif; font-size: .7rem; color: var(--pewter); white-space: nowrap; }
+td.td-price  { font-family: 'Josefin Slab', serif; text-align: right; white-space: nowrap; }
+td.td-na     { font-family: 'Josefin Slab', serif; font-size: .7rem; color: var(--pewter); font-style: italic; }
+
+.dot {
+  display: inline-block; width: 7px; height: 7px;
+  border-radius: 50%; vertical-align: middle;
+}
+.dot-ok      { background: var(--ok); }
+.dot-err     { background: var(--err); }
+.dot-pending { background: var(--pewter); animation: blink .7s ease-in-out infinite alternate; }
+@keyframes blink { from{opacity:.3} to{opacity:1} }
+
+/* ════════════════════════════════════════
+   OUTPUT AREA
+════════════════════════════════════════ */
+.output-section { margin-top: 26px; }
+
+.output-controls {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 12px; align-items: center;
+}
+
+.output-textarea {
+  font-family: 'Josefin Slab', serif;
+  width: 100%; min-height: 110px;
+  padding: 16px 20px;
+  background: var(--glass-bright);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--ink-mid);
+  font-size: .78rem;
+  line-height: 2;
+  resize: vertical;
+  outline: none;
+  backdrop-filter: blur(var(--blur-sm));
+  transition: border-color .22s;
+}
+.output-textarea:focus { border-color: rgba(184,147,74,.38); }
+
+/* ════════════════════════════════════════
+   FOOTER NOTE
+════════════════════════════════════════ */
+.footer-note {
+  margin-top: 40px;
+  font-size: .58rem;
+  letter-spacing: .2em;
+  color: var(--pewter);
+  text-align: center;
+  opacity: .65;
+  animation: riseIn .9s ease .3s both;
+}
+.footer-note a { color: var(--gold); text-decoration: none; }
+
+/* ════════════════════════════════════════
+   ANIMATION
+════════════════════════════════════════ */
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ════════════════════════════════════════
+   SCROLLBAR
+════════════════════════════════════════ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(184,147,74,.28); border-radius: 2px; }
+
+/* ════════════════════════════════════════
+   RESPONSIVE
+════════════════════════════════════════ */
+@media (max-width: 600px) {
+  .panel-main { padding: 26px 18px; }
+  thead th:nth-child(4),
+  tbody td:nth-child(4) { display: none; }
+  .logo { font-size: 2.6rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Background ── -->
+<div class="bg">
+  <div class="bg-mesh"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-lines"></div>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+  <div class="orb orb-4"></div>
+  <div class="bg-noise"></div>
+  <div class="particles" id="particles"></div>
+</div>
+
+<!-- ── Page ── -->
+<div class="page">
+
+  <!-- Header -->
+  <header class="header">
+    <p class="logo-eyebrow">Library Tools</p>
+    <h1 class="logo">Biblio</h1>
+    <div class="logo-accent"></div>
+    <p class="logo-sub">ISBN &nbsp;·&nbsp; Bibliographic Retrieval</p>
+  </header>
+
+  <!-- Main panel -->
+  <div class="panel panel-main">
+
+    <!-- ISBN input -->
+    <div class="field-label">
+      <span class="field-label-text">ISBN Input</span>
+      <span class="field-label-line"></span>
+    </div>
+    <textarea class="isbn-textarea" id="isbn-input"
+      placeholder="9784167904869&#10;9784041086124&#10;978-4-10-101013-7&#10;&#10;— one ISBN per line, hyphens optional —"></textarea>
+    <p class="hint">Queries the National Diet Library API &nbsp;·&nbsp; ISBN-10 &amp; 13 accepted &nbsp;·&nbsp; Hyphens stripped automatically</p>
+
+    <!-- Buttons -->
+    <div class="btn-row">
+      <button class="btn btn-gold" id="btn-fetch">Retrieve</button>
+      <button class="btn btn-ghost" id="btn-clear">Clear</button>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress" id="progress">
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <p class="progress-label" id="progress-label">Looking up…</p>
+    </div>
+
+    <!-- Results -->
+    <div class="results" id="results">
+
+      <div class="results-header">
+        <span class="results-rule"></span>
+        <span class="results-title">Result</span>
+        <span class="results-rule"></span>
+      </div>
+
+      <div style="display:flex;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap;">
+        <p class="results-count" id="result-count"></p>
+      </div>
+
+      <!-- Table -->
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>Title</th>
+              <th>Author / Editor</th>
+              <th>Publisher</th>
+              <th>ISBN</th>
+              <th>Price</th>
+              <th>NDC</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Output -->
+      <div class="output-section">
+        <div class="field-label" style="margin-bottom:12px">
+          <span class="field-label-text">Text Output</span>
+          <span class="field-label-line"></span>
+        </div>
+        <div class="output-controls">
+          <button class="btn btn-ghost" id="btn-copy" style="padding:8px 18px;font-size:.65rem;">Copy</button>
+          <button class="btn btn-ghost" id="btn-dl" style="padding:8px 18px;font-size:.65rem;">Download TXT</button>
+          <button class="btn btn-ghost" id="btn-csv" style="padding:8px 18px;font-size:.65rem;">Download CSV</button>
+          <button class="btn btn-ghost" id="btn-xlsx" style="padding:8px 18px;font-size:.65rem;">Download Excel</button>
+        </div>
+        <textarea class="output-textarea" id="output-text" readonly></textarea>
+      </div>
+
+    </div><!-- /results -->
+
+  </div><!-- /panel -->
+
+  <p class="footer-note">
+    Bibliographic data retrieved from <a href="https://ndlsearch.ndl.go.jp/" target="_blank">National Diet Library Search</a> &nbsp;·&nbsp; No API key required &nbsp;·&nbsp; Free
+  </p>
+
+</div><!-- /page -->
+
+<script>
+/* ── Particles ─────────────────────────────────────── */
+(function(){
+  const c = document.getElementById('particles');
+  const cfg = [
+    { n:18, col:'rgba(184,147,74,', sMin:1, sMax:2.5 },
+    { n:10, col:'rgba(122,140,124,', sMin:.8, sMax:1.8 },
+    { n: 6, col:'rgba(212,185,122,', sMin:1.2, sMax:2 },
+  ];
+  cfg.forEach(({n,col,sMin,sMax})=>{
+    for(let i=0;i<n;i++){
+      const el=document.createElement('div'); el.className='p';
+      const s=sMin+Math.random()*(sMax-sMin);
+      const dur=8+Math.random()*14;
+      const tx=(Math.random()-.5)*64, ty=(Math.random()-.5)*64;
+      const oa=.15+Math.random()*.3, ob=oa+.25+Math.random()*.2;
+      el.style.cssText=`
+        left:${Math.random()*100}%;top:${Math.random()*100}%;
+        width:${s}px;height:${s}px;
+        background:${col}${.4+Math.random()*.3});
+        --d:${dur}s;--tx:${tx}px;--ty:${ty}px;--oa:${oa};--ob:${Math.min(ob,.85)};
+        animation-delay:${Math.random()*-dur}s;
+      `;
+      c.appendChild(el);
+    }
+  });
+})();
+
+/* ── Utilities ─────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const delay = ms => new Promise(r=>setTimeout(r,ms));
+
+/* ── ISBN normalize ────────────────────────────────── */
+function normalizeISBN(raw){
+  const s = raw.replace(/[-\s\u30FC\uFF0D]/g,'').trim();
+  if(!s) return null;
+  if(/^\d{9}[\dX]$/i.test(s)) return isbn10to13(s);
+  if(/^\d{13}$/.test(s)) return s;
+  return null;
+}
+function isbn10to13(s){
+  const base='978'+s.slice(0,9);
+  let sum=0;
+  for(let i=0;i<12;i++) sum+=parseInt(base[i])*(i%2?3:1);
+  return base+((10-sum%10)%10);
+}
+
+/* ── openBD fetch (bibliographic info + NDC) ────────── */
+async function fetchOpenBD(isbn13){
+  const url=`https://api.openbd.jp/v1/get?isbn=${isbn13}`;
+  const res=await fetch(url);
+  if(!res.ok) throw new Error(`openBD HTTP ${res.status}`);
+  const json=await res.json();
+  if(!json||!json[0]) return null;
+  const summary=json[0].summary||{};
+  const onix=json[0].onix||{};
+
+  const title=summary.title||'—';
+  const author=summary.author||'—';
+  const publisher=summary.publisher||'—';
+
+  // price — 数字のみ（JPY不要）
+  let price='—';
+  try{
+    const prices=onix.ProductSupply?.SupplyDetail?.Price;
+    const priceArr=Array.isArray(prices)?prices:[prices];
+    for(const p of priceArr){
+      if(p&&p.PriceAmount){price=String(p.PriceAmount);break;}
+    }
+  }catch(e){}
+
+  // NDC from onix Subject
+  // SubjectSchemeIdentifier='78': SubjectCode is NDC without dot e.g. "7037" → "703.7"
+  let ndc='—';
+  try{
+    const subjects=onix.DescriptiveDetail?.Subject;
+    const subArr=Array.isArray(subjects)?subjects:(subjects?[subjects]:[]);
+    for(const s of subArr){
+      if(!s) continue;
+      if(s.SubjectSchemeIdentifier==='78'||s.SubjectSchemeIdentifier===78){
+        const raw=String(s.SubjectCode||s.SubjectHeadingText||'').trim();
+        if(raw){
+          // NDCコードはドットなしで格納 e.g. "7037" → "703.7", "913" → "913"
+          ndc=truncateNDC(insertNDCDot(raw));
+          break;
+        }
+      }
+    }
+  }catch(e){}
+
+  return {title,author,publisher,price,ndc};
+}
+
+/* ── NDL proxy fetch (NDC) ─────────────────────────── */
+async function fetchNDC(isbn13){
+  const proxyUrl=`api/ndl-proxy?isbn=${isbn13}`;
+  try{
+    const res=await fetch(proxyUrl);
+    if(!res.ok) return '—';
+    const text=await res.text();
+
+    const xml=new DOMParser().parseFromString(text,'text/xml');
+    const num=xml.querySelector('numberOfRecords');
+    if(!num||parseInt(num.textContent)===0) return '—';
+
+    // XMLテキスト全体から ndc9/ndc10 パターンを検索
+    // 例: rdf:resource="http://id.ndl.go.jp/class/ndc9/726.1"
+    const m=text.match(/\/class\/ndc\d+\/([\d.]+)/);
+    if(m) return truncateNDC(m[1]);
+
+    return '—';
+  }catch(e){
+    return '—';
+  }
+}
+
+/* ── NDC dot insertion e.g. "7037" → "703.7" ────────── */
+function insertNDCDot(raw){
+  // すでにドットが含まれている場合はそのまま
+  if(raw.includes('.')) return raw;
+  // 3桁以下はそのまま e.g. "913" → "913"
+  if(raw.length<=3) return raw;
+  // 4桁以上: 3桁目とその後の間にドットを挿入 e.g. "7037" → "703.7"
+  return raw.slice(0,3)+'.'+raw.slice(3);
+}
+
+/* ── NDC truncate to 1 decimal (no rounding) ────────── */
+function truncateNDC(ndc){
+  if(ndc==='—') return ndc;
+  const m=ndc.match(/^(\d+)(\.\d+)?$/);
+  if(!m) return ndc;
+  const dec=m[2]||'';
+  return m[1]+(dec.length>=2?dec.slice(0,2):dec);
+}
+
+/* ── Combined fetch ────────────────────────────────── */
+async function fetchBook(isbn13){
+  // 1) openBD（書誌情報＋NDC）
+  let info=null;
+  try{ info=await fetchOpenBD(isbn13); }catch(e){}
+
+  // 2) openBDにNDCがなければNDLプロキシで補完
+  if(info && info.ndc==='—'){
+    info.ndc=await fetchNDC(isbn13);
+  }
+
+  // 3) openBD自体が失敗した場合はNDLプロキシで全取得
+  if(!info){
+    try{
+      const res=await fetch(`api/ndl-proxy?isbn=${isbn13}`);
+      if(res.ok){
+        const text=await res.text();
+        const xml=new DOMParser().parseFromString(text,'text/xml');
+        const num=xml.querySelector('numberOfRecords');
+        if(num&&parseInt(num.textContent)>0){
+          const title=(xml.querySelector('title')?.textContent||'').trim().replace(/\s*\/.*$/,'').trim();
+          const au=[...new Set([
+            ...[...xml.querySelectorAll('creator')].map(e=>e.textContent.trim()),
+            ...[...xml.querySelectorAll('contributor')].map(e=>e.textContent.trim()),
+          ])].filter(Boolean);
+          const author=au.slice(0,3).join(' / ')||'—';
+          const publisher=(xml.querySelector('publisher')?.textContent||'').trim()||'—';
+          let price='—';
+          for(const d of xml.querySelectorAll('description,extent')){
+            const t=d.textContent;
+            const m=t.match(/[¥￥\\]?\s*([\d,]+)\s*円/)||t.match(/\\([\d,]+)/);
+            if(m){price=m[1].replace(/,/g,'');break;}
+          }
+          // NDC from rdf:resource URL
+          let ndc='—';
+          const m=text.match(/\/class\/ndc\d+\/([\d.]+)/);
+          if(m) ndc=truncateNDC(m[1]);
+          info={title,author,publisher,price,ndc};
+        }
+      }
+    }catch(e){}
+  }
+
+  return info||null;
+}
+
+/* ── State ─────────────────────────────────────────── */
+let results=[];
+
+/* ── Main fetch ────────────────────────────────────── */
+$('btn-fetch').addEventListener('click', async ()=>{
+  const lines=$('isbn-input').value.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(!lines.length){alert('Please enter at least one ISBN.');return;}
+
+  const items=[], invalids=[];
+  lines.forEach(l=>{
+    const n=normalizeISBN(l);
+    n ? items.push({orig:l,isbn13:n}) : invalids.push(l);
+  });
+  if(!items.length){alert('No valid ISBNs found.');return;}
+
+  // init UI
+  $('btn-fetch').disabled=true;
+  $('progress').classList.add('on');
+  $('results').classList.add('on');
+  const tbody=$('tbody');
+  tbody.innerHTML='';
+  results=[];
+
+  // placeholder rows
+  items.forEach((it, idx)=>{
+    const tr=document.createElement('tr');
+    tr.dataset.idx=idx;
+    tr.innerHTML=`
+      <td class="td-status"><span class="dot dot-pending"></span></td>
+      <td class="td-title">—</td><td>—</td><td>—</td>
+      <td class="td-isbn">${it.isbn13}</td>
+      <td class="td-price">—</td>
+      <td class="td-isbn">—</td>`;
+    tbody.appendChild(tr);
+  });
+
+  let done=0;
+  setProgress(0,`0 / ${items.length} looking up…`);
+
+  for(let idx=0; idx<items.length; idx++){
+    const it=items[idx];
+    const tr=tbody.querySelector(`tr[data-idx="${idx}"]`);
+    try{
+      const info=await fetchBook(it.isbn13);
+      if(info){
+        results.push({isbn:it.isbn13,...info});
+        tr.innerHTML=`
+          <td class="td-status"><span class="dot dot-ok"></span></td>
+          <td class="td-title">${esc(info.title)}</td>
+          <td>${esc(info.author)}</td>
+          <td>${esc(info.publisher)}</td>
+          <td class="td-isbn">${it.isbn13}</td>
+          <td class="td-price">${esc(info.price)}</td>
+          <td class="td-isbn">${esc(info.ndc)}</td>`;
+      } else {
+        results.push({isbn:it.isbn13,title:'(not found)',author:'—',publisher:'—',price:'—',ndc:'—'});
+        tr.innerHTML=`
+          <td class="td-status"><span class="dot dot-err"></span></td>
+          <td class="td-na" colspan="3">Not found in NDL</td>
+          <td class="td-isbn">${it.isbn13}</td>
+          <td class="td-price">—</td>
+          <td class="td-isbn">—</td>`;
+      }
+    } catch(e){
+      results.push({isbn:it.isbn13,title:'(error)',author:'—',publisher:'—',price:'—',ndc:'—'});
+      tr.innerHTML=`
+        <td class="td-status"><span class="dot dot-err"></span></td>
+        <td class="td-na" colspan="3">Fetch error: ${esc(e.message)}</td>
+        <td class="td-isbn">${it.isbn13}</td>
+        <td class="td-price">—</td>
+        <td class="td-isbn">—</td>`;
+    }
+    done++;
+    setProgress(Math.round(done/items.length*100),`${done} / ${items.length} looking up…`);
+    buildOutput(); // update text output after each row
+    await delay(320);
+  }
+
+  const ok=results.filter(r=>!r.title.startsWith('(')).length;
+  $('result-count').innerHTML=`<em>${results.length}</em> processed &nbsp;/&nbsp; <em>${ok}</em> retrieved`;
+  buildOutput();
+  setProgress(100,'Done');
+  setTimeout(()=>$('progress').classList.remove('on'),1400);
+  $('btn-fetch').disabled=false;
+});
+
+function setProgress(pct,label){
+  $('progress-fill').style.width=pct+'%';
+  $('progress-label').textContent=label;
+}
+
+function buildOutput(){
+  $('output-text').value=results
+    .map(r=>`${r.title}\t${r.author}\t${r.publisher}\t${r.isbn}\t${r.price}\t${r.ndc}`)
+    .join('\n');
+}
+
+/* ── Copy / Download ───────────────────────────────── */
+$('btn-copy').addEventListener('click', async ()=>{
+  const t=$('output-text').value; if(!t) return;
+  await navigator.clipboard.writeText(t).catch(()=>{});
+  const btn=$('btn-copy'), orig=btn.textContent;
+  btn.textContent='Copied'; setTimeout(()=>btn.textContent=orig,1800);
+});
+
+$('btn-dl').addEventListener('click',()=>{
+  const t=$('output-text').value; if(!t) return;
+  const blob=new Blob(['\uFEFF'+t],{type:'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='biblio_'+today()+'.txt';
+  a.click();
+});
+
+/* ── CSV download ──────────────────────────────────── */
+$('btn-csv').addEventListener('click',()=>{
+  if(!results.length) return;
+  const header='Title,Author / Editor,Publisher,ISBN,Price,NDC';
+  const rows=results.map(r=>[
+    r.title, r.author, r.publisher, r.isbn, r.price, r.ndc
+  ].map(csvCell).join(','));
+  const blob=new Blob(['\uFEFF'+header+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='biblio_'+today()+'.csv';
+  a.click();
+});
+
+function csvCell(v){
+  const s=String(v??'');
+  return /[,"\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+
+/* ── Excel (.xlsx) download ────────────────────────── */
+$('btn-xlsx').addEventListener('click',()=>{
+  if(!results.length) return;
+  const header=['Title','Author / Editor','Publisher','ISBN','Price','NDC'];
+  const rows=results.map(r=>[r.title,r.author,r.publisher,r.isbn,r.price,r.ndc]);
+  const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
+
+  // column widths
+  ws['!cols']=[{wch:40},{wch:28},{wch:22},{wch:16},{wch:10},{wch:8}];
+
+  // header row style (bold + fill) — requires xlsx-style; basic xlsx applies width only
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,'Biblio',ws);
+  XLSX.writeFile(wb,'biblio_'+today()+'.xlsx');
+});
+
+function today(){
+  return new Date().toISOString().slice(0,10);
+}
+
+$('btn-clear').addEventListener('click',()=>{
+  $('isbn-input').value='';
+  $('results').classList.remove('on');
+  $('progress').classList.remove('on');
+  results=[];
+});
+</script>
+</body>
+</html>
