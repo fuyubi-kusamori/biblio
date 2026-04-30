@@ -705,13 +705,19 @@ async function fetchOpenBD(isbn13){
   const author=summary.author||'—';
   const publisher=summary.publisher||'—';
 
-  // price — 数字のみ（JPY不要）
+  // price — PriceTypeCode 01（税抜本体価格）を優先
   let price='—';
   try{
     const prices=onix.ProductSupply?.SupplyDetail?.Price;
-    const priceArr=Array.isArray(prices)?prices:[prices];
-    for(const p of priceArr){
-      if(p&&p.PriceAmount){price=String(p.PriceAmount);break;}
+    const priceArr=Array.isArray(prices)?prices:(prices?[prices]:[]);
+    // まず税抜き本体価格（01）を探す
+    const base=priceArr.find(p=>p&&(p.PriceTypeCode==='01'||p.PriceTypeCode===1));
+    if(base&&base.PriceAmount){
+      price=String(base.PriceAmount);
+    } else {
+      // fallback: 最初に見つかった価格
+      const first=priceArr.find(p=>p&&p.PriceAmount);
+      if(first) price=String(first.PriceAmount);
     }
   }catch(e){}
 
