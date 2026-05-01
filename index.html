@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Biblio — ISBN Bibliographic Retrieval</title>
 <link href="https://fonts.googleapis.com/css2?family=Josefin+Slab:ital,wght@0,100;0,300;0,400;0,600;1,100;1,300&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- xlsx generation: pure JS, no external library -->
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -964,20 +964,222 @@ function csvCell(v){
   return /[,"\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
 }
 
+/* ── Pure JS xlsx generator (no external library) ──── */
+function escXml(s){
+  return String(s??'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&apos;');
+}
+
+function generateXLSX(headers, rows){
+  const allRows=[headers,...rows];
+
+  // shared strings
+  const strings=[], strMap={};
+  function si(v){
+    const s=String(v??'');
+    if(strMap[s]===undefined){strMap[s]=strings.length;strings.push(s);}
+    return strMap[s];
+  }
+  // register all strings first
+  allRows.forEach(row=>row.forEach(cell=>si(cell)));
+
+  // sheet1.xml
+  let sheetRows='';
+  allRows.forEach((row,ri)=>{
+    let cells='';
+    row.forEach((cell,ci)=>{
+      const col=colName(ci);
+      const ref=col+(ri+1);
+      cells+=`<c r="${ref}" t="s"><v>${si(cell)}</v></c>`;
+    });
+    sheetRows+=`<row r="${ri+1}">${cells}</row>`;
+  });
+
+  const colWidths=[40,28,22,16,10,8];
+  let colsXml='<cols>';
+  colWidths.forEach((w,i)=>{
+    colsXml+=`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`;
+  });
+  colsXml+='</cols>';
+
+  const sheet1=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+${colsXml}
+<sheetData>${sheetRows}</sheetData>
+</worksheet>`;
+
+  // sharedStrings.xml
+  const ssXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${strings.length}" uniqueCount="${strings.length}">
+${strings.map(s=>`<si><t xml:space="preserve">${escXml(s)}</t></si>`).join('')}
+</sst>`;
+
+  // workbook.xml
+  const wbXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Biblio" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`;
+
+  // xl/_rels/workbook.xml.rels
+  const wbRels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>`;
+
+  // _rels/.rels
+  const appRels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+
+  // [Content_Types].xml
+  const contentTypes=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>`;
+
+  const files=[
+    ['[Content_Types].xml',  contentTypes],
+    ['_rels/.rels',          appRels],
+    ['xl/workbook.xml',      wbXml],
+    ['xl/_rels/workbook.xml.rels', wbRels],
+    ['xl/worksheets/sheet1.xml',   sheet1],
+    ['xl/sharedStrings.xml', ssXml],
+  ];
+
+  return zipFiles(files);
+}
+
+function colName(i){
+  let s='';
+  i++;
+  while(i>0){s=String.fromCharCode(64+(i%26||26))+s;i=Math.floor((i-1)/26);}
+  return s;
+}
+
+/* ── ZIP builder ────────────────────────────────────── */
+function zipFiles(files){
+  const enc=new TextEncoder();
+
+  function u16le(n){return [(n)&0xff,(n>>8)&0xff];}
+  function u32le(n){
+    n=n>>>0;
+    return [n&0xff,(n>>8)&0xff,(n>>16)&0xff,(n>>24)&0xff];
+  }
+
+  function crc32(buf){
+    const table=crc32.t||(()=>{
+      const t=new Uint32Array(256);
+      for(let i=0;i<256;i++){
+        let c=i;
+        for(let j=0;j<8;j++) c=c&1?(0xedb88320^(c>>>1)):(c>>>1);
+        t[i]=c;
+      }
+      return crc32.t=t;
+    })();
+    let c=0xffffffff;
+    for(let i=0;i<buf.length;i++) c=(c>>>8)^table[(c^buf[i])&0xff];
+    return (c^0xffffffff)>>>0;
+  }
+
+  function concat(...arrays){
+    const len=arrays.reduce((s,a)=>s+a.length,0);
+    const out=new Uint8Array(len);
+    let pos=0;
+    for(const a of arrays){out.set(a,pos);pos+=a.length;}
+    return out;
+  }
+
+  const localParts=[];
+  const centralParts=[];
+  let offset=0;
+
+  for(const [name,content] of files){
+    const nameBuf=enc.encode(name);
+    const dataBuf=enc.encode(content);
+    const crc=crc32(dataBuf);
+    const size=dataBuf.length;
+
+    // Local file header
+    const lfh=new Uint8Array([
+      0x50,0x4b,0x03,0x04,   // signature
+      ...u16le(20),           // version needed: 2.0
+      ...u16le(0),            // flags
+      ...u16le(0),            // compression: STORED
+      ...u16le(0),            // mod time
+      ...u16le(0x5260),       // mod date (2023-03-01 approx)
+      ...u32le(crc),          // crc-32
+      ...u32le(size),         // compressed size
+      ...u32le(size),         // uncompressed size
+      ...u16le(nameBuf.length),
+      ...u16le(0),            // extra field length
+    ]);
+
+    localParts.push(lfh, nameBuf, dataBuf);
+
+    // Central directory entry
+    const cde=new Uint8Array([
+      0x50,0x4b,0x01,0x02,   // signature
+      ...u16le(20),           // version made by
+      ...u16le(20),           // version needed
+      ...u16le(0),            // flags
+      ...u16le(0),            // compression
+      ...u16le(0),            // mod time
+      ...u16le(0x5260),       // mod date
+      ...u32le(crc),
+      ...u32le(size),
+      ...u32le(size),
+      ...u16le(nameBuf.length),
+      ...u16le(0),            // extra
+      ...u16le(0),            // comment
+      ...u16le(0),            // disk start
+      ...u16le(0),            // internal attr
+      ...u32le(0),            // external attr
+      ...u32le(offset),       // local header offset
+    ]);
+
+    centralParts.push(cde, nameBuf);
+    offset+=lfh.length+nameBuf.length+dataBuf.length;
+  }
+
+  const localData=concat(...localParts);
+  const cdData=concat(...centralParts);
+  const cdSize=cdData.length;
+  const cdOffset=localData.length;
+  const numFiles=files.length;
+
+  // End of central directory
+  const eocd=new Uint8Array([
+    0x50,0x4b,0x05,0x06,
+    ...u16le(0),             // disk number
+    ...u16le(0),             // disk with CD
+    ...u16le(numFiles),      // entries on disk
+    ...u16le(numFiles),      // total entries
+    ...u32le(cdSize),        // CD size
+    ...u32le(cdOffset),      // CD offset
+    ...u16le(0),             // comment length
+  ]);
+
+  return concat(localData, cdData, eocd);
+}
+
 /* ── Excel (.xlsx) download ────────────────────────── */
 $('btn-xlsx').addEventListener('click',()=>{
   if(!results.length) return;
   try{
-    const header=['Title','Author / Editor','Publisher','ISBN','Price','NDC'];
+    const headers=['Title','Author / Editor','Publisher','ISBN','Price','NDC'];
     const rows=results.map(r=>[r.title,r.author,r.publisher,r.isbn,r.price,r.ndc]);
-    const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
-    ws['!cols']=[{wch:40},{wch:28},{wch:22},{wch:16},{wch:10},{wch:8}];
-    const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,'Biblio',ws);
-
-    // Blob経由でダウンロード（writeFileより互換性が高い）
-    const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
-    const blob=new Blob([wbout],{type:'application/octet-stream'});
+    const xlsxBytes=generateXLSX(headers,rows);
+    const blob=new Blob([xlsxBytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
     a.download='biblio_'+today()+'.xlsx';
