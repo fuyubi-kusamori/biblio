@@ -626,9 +626,9 @@ td.td-na     { font-family: 'Josefin Slab', serif; font-size: .7rem; color: var(
         </div>
         <div class="output-controls">
           <button class="btn btn-ghost" id="btn-copy" style="padding:8px 18px;font-size:.65rem;">Copy</button>
+          <button class="btn btn-ghost" id="btn-dl" style="padding:8px 18px;font-size:.65rem;">Download TXT</button>
           <button class="btn btn-ghost" id="btn-csv" style="padding:8px 18px;font-size:.65rem;">Download CSV</button>
           <button class="btn btn-ghost" id="btn-xlsx" style="padding:8px 18px;font-size:.65rem;">Download Excel</button>
-          <button class="btn btn-ghost" id="btn-covers" style="padding:8px 18px;font-size:.65rem;">Download Covers</button>
         </div>
         <textarea class="output-textarea" id="output-text" readonly></textarea>
       </div>
@@ -740,12 +740,12 @@ async function fetchOpenBD(isbn13){
     }
   }catch(e){}
 
-  return {title,author,publisher,price,ndc,cover:summary.cover||''};
+  return {title,author,publisher,price,ndc};
 }
 
 /* ── NDL proxy fetch (NDC) ─────────────────────────── */
 async function fetchNDC(isbn13){
-  const proxyUrl=`ndl-proxy.php?isbn=${isbn13}`;
+  const proxyUrl=`api/ndl-proxy?isbn=${isbn13}`;
   try{
     const res=await fetch(proxyUrl);
     if(!res.ok) return '—';
@@ -799,7 +799,7 @@ async function fetchBook(isbn13){
   // 3) openBD自体が失敗した場合はNDLプロキシで全取得
   if(!info){
     try{
-      const res=await fetch(`ndl-proxy.php?isbn=${isbn13}`);
+      const res=await fetch(`api/ndl-proxy?isbn=${isbn13}`);
       if(res.ok){
         const text=await res.text();
         const xml=new DOMParser().parseFromString(text,'text/xml');
@@ -886,7 +886,7 @@ $('btn-fetch').addEventListener('click', async ()=>{
           <td class="td-price">${esc(info.price)}</td>
           <td class="td-isbn">${esc(info.ndc)}</td>`;
       } else {
-        results.push({isbn:it.isbn13,title:'(not found)',author:'—',publisher:'—',price:'—',ndc:'—',cover:''});
+        results.push({isbn:it.isbn13,title:'(not found)',author:'—',publisher:'—',price:'—',ndc:'—'});
         tr.innerHTML=`
           <td class="td-status"><span class="dot dot-err"></span></td>
           <td class="td-na" colspan="3">Not found in NDL</td>
@@ -895,7 +895,7 @@ $('btn-fetch').addEventListener('click', async ()=>{
           <td class="td-isbn">—</td>`;
       }
     } catch(e){
-      results.push({isbn:it.isbn13,title:'(error)',author:'—',publisher:'—',price:'—',ndc:'—',cover:''});
+      results.push({isbn:it.isbn13,title:'(error)',author:'—',publisher:'—',price:'—',ndc:'—'});
       tr.innerHTML=`
         <td class="td-status"><span class="dot dot-err"></span></td>
         <td class="td-na" colspan="3">Fetch error: ${esc(e.message)}</td>
@@ -934,6 +934,15 @@ $('btn-copy').addEventListener('click', async ()=>{
   await navigator.clipboard.writeText(t).catch(()=>{});
   const btn=$('btn-copy'), orig=btn.textContent;
   btn.textContent='Copied'; setTimeout(()=>btn.textContent=orig,1800);
+});
+
+$('btn-dl').addEventListener('click',()=>{
+  const t=$('output-text').value; if(!t) return;
+  const blob=new Blob(['\uFEFF'+t],{type:'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='biblio_'+today()+'.txt';
+  a.click();
 });
 
 /* ── CSV download ──────────────────────────────────── */
@@ -1185,140 +1194,6 @@ $('btn-xlsx').addEventListener('click',()=>{
 
 function today(){
   return new Date().toISOString().slice(0,10);
-}
-
-/* ── Cover images ZIP download ─────────────────────── */
-$('btn-covers').addEventListener('click', async ()=>{
-  if(!results.length) return;
-
-  const btn=$('btn-covers');
-  const orig=btn.textContent;
-  btn.textContent='Downloading…';
-  btn.disabled=true;
-
-  const imageFiles=[];
-  let fetched=0, skipped=0;
-
-  for(const r of results){
-    // openBD cover URL → fallback to NDL thumbnail
-    const urls=[];
-    if(r.cover) urls.push(r.cover);
-    urls.push(`https://ndlsearch.ndl.go.jp/thumbnail/${r.isbn}.jpg`);
-
-    let imgBytes=null;
-    let ext='jpg';
-
-    for(const url of urls){
-      try{
-        const res=await fetch(url);
-        if(!res.ok) continue;
-        const ct=res.headers.get('content-type')||'';
-        // NDLは画像がない場合でも200を返すことがあるのでサイズチェック
-        const buf=await res.arrayBuffer();
-        if(buf.byteLength<1000) continue; // 小さすぎる＝ダミー画像
-        imgBytes=new Uint8Array(buf);
-        ext=ct.includes('png')?'png':'jpg';
-        break;
-      }catch(e){ continue; }
-    }
-
-    if(imgBytes){
-      // ファイル名: NDC_タイトル(ISBN).jpg — ファイル名に使えない文字を除去
-      const safe=s=>String(s).replace(/[\\/:*?"<>|]/g,'_').slice(0,40);
-      const fname=`${safe(r.ndc==='—'?'000':r.ndc)}_${safe(r.title)}_${r.isbn}.${ext}`;
-      imageFiles.push([fname, imgBytes]);
-      fetched++;
-    } else {
-      skipped++;
-    }
-    await new Promise(r=>setTimeout(r,150)); // 連続アクセス抑制
-  }
-
-  if(!imageFiles.length){
-    alert('No cover images could be retrieved.');
-    btn.textContent=orig; btn.disabled=false;
-    return;
-  }
-
-  // ZIPに格納
-  const zipBytes=zipBinary(imageFiles);
-  const blob=new Blob([zipBytes],{type:'application/zip'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='covers_'+today()+'.zip';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-
-  btn.textContent=`Done (${fetched} images)`;
-  setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},2500);
-});
-
-/* ── ZIP builder for binary files ──────────────────── */
-function zipBinary(files){
-  function u16le(n){return new Uint8Array([(n)&0xff,(n>>8)&0xff]);}
-  function u32le(n){n=n>>>0;return new Uint8Array([n&0xff,(n>>8)&0xff,(n>>16)&0xff,(n>>24)&0xff]);}
-
-  function crc32(buf){
-    if(!crc32._t){
-      crc32._t=new Uint32Array(256);
-      for(let i=0;i<256;i++){let c=i;for(let j=0;j<8;j++)c=c&1?(0xedb88320^(c>>>1)):(c>>>1);crc32._t[i]=c;}
-    }
-    let c=0xffffffff;
-    for(let i=0;i<buf.length;i++) c=(c>>>8)^crc32._t[(c^buf[i])&0xff];
-    return (c^0xffffffff)>>>0;
-  }
-
-  function concat(...arrays){
-    const len=arrays.reduce((s,a)=>s+a.length,0);
-    const out=new Uint8Array(len); let pos=0;
-    for(const a of arrays){out.set(a,pos);pos+=a.length;}
-    return out;
-  }
-
-  const enc=new TextEncoder();
-  const locals=[], cds=[];
-  let offset=0;
-
-  for(const [name, data] of files){
-    const nameBuf=enc.encode(name);
-    const crc=crc32(data);
-    const size=data.length;
-
-    const lfh=concat(
-      new Uint8Array([0x50,0x4b,0x03,0x04]),
-      u16le(20),u16le(0),u16le(0),
-      u16le(0),u16le(0x5260),
-      u32le(crc),u32le(size),u32le(size),
-      u16le(nameBuf.length),u16le(0),
-      nameBuf
-    );
-    locals.push(lfh, data);
-
-    const cde=concat(
-      new Uint8Array([0x50,0x4b,0x01,0x02]),
-      u16le(20),u16le(20),u16le(0),u16le(0),
-      u16le(0),u16le(0x5260),
-      u32le(crc),u32le(size),u32le(size),
-      u16le(nameBuf.length),u16le(0),u16le(0),
-      u16le(0),u16le(0),u32le(0),u32le(offset),
-      nameBuf
-    );
-    cds.push(cde);
-    offset+=lfh.length+data.length;
-  }
-
-  const localData=concat(...locals);
-  const cdData=concat(...cds);
-  const eocd=concat(
-    new Uint8Array([0x50,0x4b,0x05,0x06]),
-    u16le(0),u16le(0),
-    u16le(files.length),u16le(files.length),
-    u32le(cdData.length),u32le(localData.length),
-    u16le(0)
-  );
-  return concat(localData,cdData,eocd);
 }
 
 $('btn-clear').addEventListener('click',()=>{
